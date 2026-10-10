@@ -7,3 +7,5 @@ config.h
 .vercel
 *.log
 .env*
+
+firmware/esp32_oled_meteo/build/
