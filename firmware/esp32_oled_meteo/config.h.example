@@ -1,0 +1,12 @@
+// Configuración de la pantalla ESP32 + OLED SSD1306 (128x64, I2C).
+// Copia este archivo a `config.h` y rellena tus valores.
+#pragma once
+
+#define WIFI_SSID "TU_WIFI"
+#define WIFI_PASSWORD "TU_CLAVE"
+
+// Endpoint de la API de PANTALLA_MICROESTACIONES (Vercel).
+#define API_URL "https://tecrural-ms-pantalla.vercel.app/api/latest"
+
+// Refresco en milisegundos (60 s por defecto).
+#define REFRESH_MS 60000UL

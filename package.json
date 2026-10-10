@@ -1,0 +1,17 @@
+{
+  "name": "pantalla-microestaciones-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/dev-server.mjs",
+    "test": "node --test api/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0"
+  },
+  "devDependencies": {}
+}

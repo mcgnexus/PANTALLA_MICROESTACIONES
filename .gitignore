@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.*
+!.env.example
+config.h
+.DS_Store
+.vercel
+*.log
+.env*
