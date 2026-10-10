@@ -7,6 +7,9 @@
 
 // Endpoint de la API de PANTALLA_MICROESTACIONES (Vercel).
 #define API_URL "https://tecrural-ms-pantalla.vercel.app/api/latest"
+#define DIAGNOSTICS_URL "https://tecrural-ms-pantalla.vercel.app/api/diagnostics"
+#define MAIN_HEALTH_URL "https://tecrural-microestacion.vercel.app/health"
+#define STATION_ID "esp32c3-01"
 
 // Refresco en milisegundos (60 s por defecto).
 #define REFRESH_MS 60000UL

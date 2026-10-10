@@ -53,7 +53,36 @@ ESP32 + OLED ──HTTPS GET──► /api/latest (Vercel) ──► Neon (measu
 DATABASE_URL="postgresql://..." node scripts/test-latest.mjs
 ```
 
-## Firmware
+## Diagnóstico de comunicación
+
+`GET /api/diagnostics` ejecuta una consulta real a Neon y devuelve
+`database: "ok"`, `checkedAt` (hora de PostgreSQL) y, por estación pública:
+`receivedAt`, `observedAt`, `lastContact`, `sequence`, sus antigüedades y
+`receptionState`. La respuesta lleva `no-store` para navegador y CDN.
+Solo admite GET y no escribe en ninguna tabla ni modifica el contacto del sensor.
+Incluso sin estaciones o sin medidas puede confirmar que la base es accesible.
+
+La OLED alterna cada cinco segundos entre la lectura y el diagnóstico:
+
+- `Pant API 200 BD OK`: la pantalla pudo consultar la API de pantalla y Neon.
+- `Web/BD HTTP 200`: la pantalla alcanzó `/health` de la app principal, que
+  ejecuta `SELECT 1`. No equivale a comprobar una subida de medidas.
+- `Recibido N min`: antigüedad de la última fila recibida del sensor, incluyendo
+  filas inválidas; `Medida N min` usa la última medida válida y no borrada.
+- `Recepcion retrasada`: supera dos intervalos de sincronización más 60 segundos.
+  No se reutiliza el campo almacenado `connectivity` como prueba de conexión.
+- Códigos HTTP negativos indican fallo de transporte en el ESP32. Los códigos
+  4xx/5xx corresponden a respuestas del servidor; el puerto serie los registra.
+
+Configura `STATION_ID`, `DIAGNOSTICS_URL` y `MAIN_HEALTH_URL` en `config.h`.
+Primero despliega la API nueva; después compila y carga el firmware OLED.
+La estación medidora no necesita cambios ni debe compartir su token con la OLED.
+Que la OLED comunique no demuestra que el sensor esté enviando; si comparten
+hotspot, permite contrastar el acceso HTTPS desde esa red.
+
+Verificación de API: `npm ci` y `npm test`.
+
+## Instalación del firmware
 
 Carpeta `firmware/esp32_oled_meteo/`. Placa objetivo: ESP32 DevKit clásico
 (pista `esp32:esp32:esp32`).

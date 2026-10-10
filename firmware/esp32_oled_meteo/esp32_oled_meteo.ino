@@ -33,6 +33,12 @@
 #ifndef REFRESH_MS
 #define REFRESH_MS 60000UL
 #endif
+#ifndef STATION_ID
+#define STATION_ID "esp32c3-01"
+#endif
+#ifndef MAIN_HEALTH_URL
+#define MAIN_HEALTH_URL "https://tecrural-microestacion.vercel.app/health"
+#endif
 #ifndef OLED_SDA
 #define OLED_SDA 21
 #endif
@@ -49,6 +55,105 @@
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 unsigned long lastFetch = 0;
+unsigned long lastPage = 0;
+unsigned long lastDiagnostic = 0;
+bool diagnosticPage = false;
+bool databaseOK = false;
+bool hasReading = false;
+int diagnosticHTTP = 0;
+int mainHTTP = 0;
+int latestHTTP = 0;
+long receptionAge = -1;
+long measurementAge = -1;
+String receptionState = "unknown";
+uint8_t readingFrame[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
+
+JsonObject selectStation(JsonArray stations) {
+  for (JsonObject station : stations) {
+    if (String(station["id"] | "") == STATION_ID) return station;
+  }
+  // Nunca sustituir la estación buscada por otra y presentar su medida como propia.
+  return JsonObject();
+}
+
+void renderDiagnostics() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print(WiFi.status() == WL_CONNECTED ? "WiFi OK " : "WiFi NO ");
+  display.print(WiFi.RSSI());
+  display.print(" dBm");
+  display.setCursor(0, 10);
+  display.print("Pant API "); display.print(diagnosticHTTP);
+  display.print(databaseOK ? " BD OK" : " BD ?");
+  display.setCursor(0, 20);
+  display.print("Web/BD HTTP "); display.print(mainHTTP);
+  unsigned long elapsed = (millis() - lastDiagnostic) / 1000;
+  display.setCursor(0, 30);
+  if (!databaseOK) display.print("Recepcion sin verificar");
+  else if (receptionAge < 0) display.print("Sin recepcion registrada");
+  else {
+    display.print("Recibido "); display.print((receptionAge + elapsed) / 60); display.print(" min");
+  }
+  display.setCursor(0, 40);
+  if (databaseOK && measurementAge >= 0) {
+    display.print("Medida "); display.print((measurementAge + elapsed) / 60); display.print(" min");
+  } else display.print("Medida sin verificar");
+  display.setCursor(0, 50);
+  display.print(!databaseOK ? "Consulta fallo"
+    : receptionState == "recent" ? "Recepcion reciente"
+    : receptionState == "delayed" ? "Recepcion retrasada" : "Sin datos estacion");
+  display.display();
+}
+
+void fetchDiagnostics() {
+  databaseOK = false;
+  receptionAge = -1;
+  measurementAge = -1;
+  diagnosticHTTP = 0;
+  mainHTTP = 0;
+  if (WiFi.status() != WL_CONNECTED) return;
+  String url(API_URL);
+  url = url.substring(0, url.lastIndexOf('/') + 1) + "diagnostics";
+#ifdef DIAGNOSTICS_URL
+  url = DIAGNOSTICS_URL;
+#endif
+  WiFiClientSecure client;
+  client.setInsecure();  // Mismo transporte del firmware existente.
+  HTTPClient http;
+  if (http.begin(client, url)) {
+    http.setTimeout(10000);
+    http.setConnectTimeout(10000);
+    http.addHeader("Cache-Control", "no-cache");
+    diagnosticHTTP = http.GET();
+    if (diagnosticHTTP == HTTP_CODE_OK) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, http.getString())) {
+        databaseOK = String(doc["database"] | "") == "ok";
+        JsonObject station = selectStation(doc["stations"].as<JsonArray>());
+        if (!station.isNull()) {
+          if (!station["receptionAgeSeconds"].isNull()) receptionAge = station["receptionAgeSeconds"].as<long>();
+          if (!station["measurementAgeSeconds"].isNull()) measurementAge = station["measurementAgeSeconds"].as<long>();
+          receptionState = station["receptionState"].as<String>();
+        } else receptionState = "never";
+      }
+    }
+    http.end();
+  }
+  lastDiagnostic = millis();
+  // /health en la app principal ejecuta SELECT 1: comprueba la otra API y su BD,
+  // pero no inserta medidas ni actualiza el contacto de la estación.
+  if (http.begin(client, MAIN_HEALTH_URL)) {
+    http.setTimeout(10000);
+    http.setConnectTimeout(10000);
+    mainHTTP = http.GET();
+    http.end();
+  }
+  Serial.printf("[diagnostico] pantalla HTTP=%d BD=%s; web/BD HTTP=%d; recepcion=%ld s, estado=%s\n",
+                diagnosticHTTP, databaseOK ? "OK" : "NO VERIFICADA", mainHTTP,
+                receptionAge, receptionState.c_str());
+}
 
 void drawStatusLine(const String &text) {
   display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
@@ -116,9 +221,12 @@ void renderReading(const String &name, bool hasTemp, float temperatureC,
   }
 
   display.display();
+  memcpy(readingFrame, display.getBuffer(), sizeof(readingFrame));
+  hasReading = true;
 }
 
 void fetchLatest() {
+  latestHTTP = 0;
   if (WiFi.status() != WL_CONNECTED) {
     drawStatusLine("Sin WiFi");
     WiFi.reconnect();
@@ -137,6 +245,8 @@ void fetchLatest() {
   http.setConnectTimeout(10000);
 
   int code = http.GET();
+  latestHTTP = code;
+  Serial.printf("[lectura] HTTP=%d\n", code);
   if (code != HTTP_CODE_OK) {
     drawStatusLine("Error HTTP " + String(code));
     http.end();
@@ -159,7 +269,7 @@ void fetchLatest() {
   }
 
   JsonArray stations = doc["stations"].as<JsonArray>();
-  JsonObject st = stations.size() > 0 ? stations[0].as<JsonObject>() : JsonObject();
+  JsonObject st = selectStation(stations);
 
   if (st.isNull()) {
     drawStatusLine("Sin estaciones");
@@ -181,6 +291,7 @@ void fetchLatest() {
 
 void setup() {
   Serial.begin(115200);
+  lastFetch = millis() - REFRESH_MS;
 
   Wire.begin(OLED_SDA, OLED_SCL);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
@@ -214,10 +325,22 @@ void setup() {
 }
 
 void loop() {
-  if (millis() - lastFetch < REFRESH_MS) {
-    delay(200);
-    return;
+  if (millis() - lastFetch >= REFRESH_MS) {
+    lastFetch = millis();
+    fetchLatest();
+    fetchDiagnostics();
+    diagnosticPage = true;
+    lastPage = millis();
+    renderDiagnostics();
   }
-  lastFetch = millis();
-  fetchLatest();
+  if (millis() - lastPage >= 5000) {
+    lastPage = millis();
+    diagnosticPage = !diagnosticPage;
+    if (diagnosticPage || !hasReading || latestHTTP != HTTP_CODE_OK) renderDiagnostics();
+    else {
+      memcpy(display.getBuffer(), readingFrame, sizeof(readingFrame));
+      display.display();
+    }
+  }
+  delay(100);
 }

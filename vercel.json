@@ -3,6 +3,9 @@
   "functions": {
     "api/latest.mjs": {
       "maxDuration": 20
+    },
+    "api/diagnostics.mjs": {
+      "maxDuration": 20
     }
   }
 }
